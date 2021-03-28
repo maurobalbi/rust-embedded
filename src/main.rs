@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+use hal::{gpio::GpioExt, prelude::{InputPin, OutputPin}, rcc::RccExt};
 // pick a panicking behavior
 use panic_halt as _; // you can put a breakpoint on `rust_begin_unwind` to catch panics
                      // use panic_abort as _; // requires nightly
@@ -11,54 +12,29 @@ use cortex_m::asm;
 use cortex_m_rt::entry;
 use cortex_m_semihosting::hprintln;
 
-use stm32l4::stm32l4x6;
-use stm32l4::stm32l4x6::tim6;
-
-#[inline(never)]
-fn delay(tim6: &tim6::RegisterBlock, ms: u16) {
-    // Set the timer to go off in `ms` ticks
-    // 1 tick = 1 ms
-    tim6.arr.write(|w| w.arr().bits(ms));
-
-    // CEN: Enable the counter
-    tim6.cr1.modify(|_, w| w.cen().set_bit());
-
-    // Wait until the alarm goes off (until the update event occurs)
-    while !tim6.sr.read().uif().bit_is_set() {}
-
-    // Clear the update event flag
-    tim6.sr.modify(|_, w| w.uif().clear_bit());
-}
+use stm32l4xx_hal as hal;
 
 #[entry]
 fn main() -> ! {
-    let peripherals = stm32l4x6::Peripherals::take().unwrap();
+    let mut peripherals = hal::stm32::Peripherals::take().unwrap();
 
-    let tim6 = &peripherals.TIM6;
+    let mut rcc = peripherals.RCC.constrain();
 
-    let rcc = &peripherals.RCC;
+    let mut gpioa = peripherals.GPIOA.split(&mut rcc.ahb2);
+    let mut gpioc = peripherals.GPIOC.split(&mut rcc.ahb2);
 
-    rcc.ahb2enr.modify(|_, w| w.gpioaen().set_bit());
-    rcc.ahb2enr.modify(|_, w| w.gpiocen().set_bit());
+    let mut led = gpioa.pa5.into_push_pull_output(&mut gpioa.moder, &mut gpioa.otyper);
 
-    rcc.apb1enr1.modify(|_, w| w.tim6en().set_bit());
-    tim6.cr1.write(|w| w.opm().set_bit().cen().clear_bit());
-    tim6.psc.write(|w| w.psc().bits(7_999));
-
-    let gpioa = &peripherals.GPIOA;
-    let gpioc = &peripherals.GPIOC;
-
-    gpioa.moder.modify(|_, w| w.moder5().output());
-    gpioc.moder.modify(|_, w| w.moder13().input());
+    let mut btn = gpioc.pc13.into_pull_up_input(&mut gpioc.moder, &mut gpioc.pupdr);
 
     let ms = 500;
     loop {
-        let bit = gpioc.idr.read().idr13();
+    let bit = btn.is_low().unwrap();
 
-        if bit.bit_is_set() {
-            gpioa.odr.modify(|_, w| w.odr5().set_bit());
+        if bit {
+            led.set_high();
         } else {
-            gpioa.odr.modify(|_, w| w.odr5().clear_bit());
+            led.set_low();
         }
     }
 }
